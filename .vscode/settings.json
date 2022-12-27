@@ -1,0 +1,11 @@
+{
+    "python.autoComplete.extraPaths": [
+        "/home/semjon/catkin_ws/devel_isolated/unity_robotics_demo_msgs/lib/python3/dist-packages",
+        "/home/semjon/catkin_ws/devel_isolated/ros_tcp_endpoint/lib/python3/dist-packages",
+        "/home/semjon/catkin_ws/devel_isolated/ros_essentials_cpp/lib/python3/dist-packages",
+        "/home/semjon/catkin_ws/devel_isolated/my_dyn_rec/lib/python3/dist-packages",
+        "/home/semjon/catkin_ws/devel_isolated/file_server/lib/python3/dist-packages",
+        "/home/semjon/catkin_ws/devel/lib/python3/dist-packages",
+        "/opt/ros/noetic/lib/python3/dist-packages"
+    ]
+}
