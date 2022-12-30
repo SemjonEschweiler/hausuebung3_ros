@@ -40,6 +40,10 @@ struct RobotPose_m {
 struct RobotPos_px {
     
     double x_px, y_px;
+
+    bool operator==(const RobotPos_px& other) const {
+        return x_px == other.x_px && y_px == other.y_px;
+    }
 };
 
 ros::Publisher publisher;
@@ -68,8 +72,10 @@ void rotateByAngle(double angleDg, bool positiveRot, double angVelocityDg);
 void pose_callback(const nav_msgs::Odometry::ConstPtr & pose_message);
 void message_callback(const nav_msgs::OccupancyGrid::ConstPtr& msg);
 void go_to_pose_via_algorithm(RobotPose_m goal);
-void printVectorPositions(std::vector<RobotPos_px> *v);
-std::vector<RobotPos_px>* getAdjacentPixel(RobotPos_px initPx);
+void visualizeVectorPositions(std::vector<RobotPos_px>* v);
+std::vector<RobotPos_px> getAdjacentPixel(RobotPos_px initPx);
+std::vector<RobotPos_px> check_if_path_is_found_yet(std::vector<std::vector<std::vector<RobotPos_px>>>* paths, RobotPos_px startingPos_px, RobotPos_px goal_px);
+bool isPosInPointsVisited(RobotPos_px current_adj_px, std::vector<RobotPos_px>* points_visited);
 
 RobotPos_px convertRobotPose_mToRobotPos_px(RobotPose_m pose_m);
 RobotPose_m convertRobotPos_pxToRobotPose_m(RobotPos_px pos_px);
@@ -82,6 +88,7 @@ double deg2rad(double deg);
 EulerAngles ToEulerAngles(Quaternion q);
 std::vector<std::vector<int>> vector_map;
 void setMarkerAtRobotPos_px(RobotPos_px pos_px);
+bool map_received = false;
 
 ros::Duration ten_seconds;
 
@@ -120,13 +127,27 @@ int main(int argc, char **argv)
 
 	publisher = n.advertise<geometry_msgs::Twist>("/cmd_vel", 1000);
     pub_viz = n.advertise<visualization_msgs::Marker>("/visualization_marker", 10);
-    subscriber_pose = n.subscribe("/odom", 10, pose_callback); //Why does pose_callback not get called sometimes?
+    subscriber_pose = n.subscribe("/odom", 10, pose_callback);
     client = n.serviceClient<std_srvs::Empty>("/gazebo/reset_simulation");
-    sub_map = n.subscribe("map", 10, message_callback);
+    sub_map = n.subscribe("/map", 10, message_callback);
 
-    while (pub_viz.getNumSubscribers() == 0)
+    // std::vector<int> vic = {1,2,3,4,5};
+
+    // for(int i =0; i<100;i++)
+    // {
+    //     ros::spinOnce();
+    //     ROS_INFO_STREAM("Sleeping to attach debugger... [" << i << "/200]");
+    //     rate.sleep();
+    // }
+
+    int counter = 0;
+    // while (map_received == false)
+    while (pub_viz.getNumSubscribers() == 0 || map_received == false)
     {
+        ros::spinOnce();
+        ROS_INFO_STREAM("Wating for RVIZ to finish loading... [" << counter << "]");
         rate.sleep();
+        counter += 1;
     }
     //Test your code here
     ROS_INFO_STREAM("\n\n\n******START TESTING************\n");    
@@ -137,7 +158,7 @@ int main(int argc, char **argv)
 
     RobotPos_px px_1 = {200, 200};
     RobotPos_px px_2 = {0, 0};
-    RobotPos_px px_3 = {200, 190};
+    RobotPos_px px_3 = {200, 191};
     // RobotPose_m output_m1 = convertRobotPos_pxToRobotPose_m(px_1);
     // RobotPose_m output_m2 = convertRobotPos_pxToRobotPose_m(px_2);
 
@@ -151,10 +172,16 @@ int main(int argc, char **argv)
 
     // ROS_INFO_STREAM("output_px1.x_px: " << output_px1.x_px << "   output_px1.y_px: " << output_px1.y_px);
     // ROS_INFO_STREAM("output_px2.x_px: " << output_px2.x_px << "   output_px2.y_px: " << output_px2.y_px);
-    
-    // printVectorPositions(getAdjacentPixel(px_1));
-    // printVectorPositions(getAdjacentPixel(px_2));
-    // printVectorPositions(getAdjacentPixel(px_3));
+    // std::vector<RobotPos_px> adj_px_1 = getAdjacentPixel(px_1);
+    // std::vector<RobotPos_px> adj_px_2 = getAdjacentPixel(px_2);
+    // std::vector<RobotPos_px> adj_px_3 = getAdjacentPixel(px_3);
+    // visualizeVectorPositions(&adj_px_1);
+    // visualizeVectorPositions(&adj_px_2);
+    // visualizeVectorPositions(&adj_px_3);
+
+    // setMarkerAtRobotPos_px(px_1);
+    // setMarkerAtRobotPos_px(px_2);
+    // setMarkerAtRobotPos_px(px_3);
 
     if (isUebung3_2){
         ROS_INFO_STREAM("Hausuebung3_2 will start now!!");
@@ -168,7 +195,7 @@ int main(int argc, char **argv)
         }
     } else if(isUebung3_3){
         ROS_INFO_STREAM("Hausuebung3_3 will start now!!");
-        RobotPose_m rp = {5,5,0};
+        RobotPose_m rp = {-1, 6,0};
         go_to_pose_via_algorithm(rp);
     }
     //go_to_goal(xi_1);
@@ -239,12 +266,15 @@ void message_callback(const nav_msgs::OccupancyGrid::ConstPtr& msg)
     ROS_INFO_STREAM("Amount of pixels: " << msg->data.size());
     ROS_INFO_STREAM("vector size: x: " << vector_map[0].size() << " y: " << vector_map.size());
 
-    //THIS IS FOR TESTING PURPOSES, ONLY UNCOMMENT IF YOU WANT TO CHECK WHAT VALUES THE VECTOR STORES!!!
+    // THIS IS FOR TESTING PURPOSES, ONLY UNCOMMENT IF YOU WANT TO CHECK WHAT VALUES THE VECTOR STORES!!!
     // for (int i=0;i<vector_map.size(); i++){
     //     for (int j=0; j<vector_map[i].size(); j++){
     //         ROS_INFO_STREAM("Vector value at [i:" << i << ",j:" << j << "]: " << vector_map[i][j]);
     //     }
     // }
+
+    ROS_INFO_STREAM("Map received finished! ");
+    map_received = true;
 }
 
 void pose_callback(const nav_msgs::Odometry::ConstPtr & pose_message){
@@ -276,14 +306,79 @@ void go_to_pose_via_algorithm(RobotPose_m goal){
 
     ROS_INFO_STREAM("startingPos_px.x_px: " << startingPos_px.x_px << "    startingPos_px.y_px: " << startingPos_px.y_px );
     ROS_INFO_STREAM("goal_px.x_px: " << goal_px.x_px << "    goal_px.y_px: " << goal_px.y_px );
+
+    std::vector<RobotPos_px> points_visited;
+    std::vector<std::vector<std::vector<RobotPos_px>>> paths; 
+    RobotPos_px current_last_px_of_string, current_adj_px;
+    std::vector<RobotPos_px> current_adj_px_vec, copy_of_current_string, new_string;
+    //First vector stores the level: level two would be AB, level 4 would be ABCD
+    //Second vector stores all the strings like for l3 for example: ABC, ABD, ACE, ACF, ...
+    //Third vector stores all the connected RobotPos's
+
+    std::vector<std::vector<RobotPos_px>> level1; 
+    std::vector<RobotPos_px> starting_point = {startingPos_px};
+    level1.push_back(starting_point);
+    paths.push_back(level1);
+
+    while(check_if_path_is_found_yet(&paths, startingPos_px, goal_px).empty()){//continue searching, as long as vector is empty
+        std::vector<std::vector<RobotPos_px>> next_level;
+        int highest_level = paths.size() - 1; //-1 to determine the index of the highest level
+        ROS_INFO_STREAM("Highest level:" << highest_level);
+        for(int i=0;i<paths[highest_level].size(); i++){
+            current_last_px_of_string = paths[highest_level][i][highest_level];
+            current_adj_px_vec = getAdjacentPixel(current_last_px_of_string);
+            for (int j=0;j< current_adj_px_vec.size(); j++){
+                current_adj_px = current_adj_px_vec[j];
+                if(isPosInPointsVisited(current_adj_px, &points_visited)){
+                    continue;
+                }else{
+                    new_string = paths[highest_level][i];
+                    new_string.push_back(current_adj_px);
+                    next_level.push_back(new_string);
+                    points_visited.push_back(current_last_px_of_string);
+                }
+            }
+        }
+        paths.push_back(next_level);
+        ROS_INFO_STREAM("Next Level was created!!");
+    }
+    std::vector<RobotPos_px> path_to_goal = check_if_path_is_found_yet(&paths, startingPos_px, goal_px);
+    visualizeVectorPositions(&path_to_goal);
+
+}
+
+bool isPosInPointsVisited(RobotPos_px current_adj_px, std::vector<RobotPos_px>* points_visited){
+    for (int i=0;i<(*points_visited).size();i++){
+        RobotPos_px p = (*points_visited)[i];
+        if (current_adj_px == p){
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<RobotPos_px> check_if_path_is_found_yet(std::vector<std::vector<std::vector<RobotPos_px>>>* paths, RobotPos_px startingPos_px, RobotPos_px goal_px){
+    int highest_level = paths->size()-1;
+    ROS_INFO_STREAM("paths[highest_level].size(): " << (*paths)[highest_level].size());
+    for (int i=0; i<(*paths)[highest_level].size(); i++){
+        int startingPos_amount = std::count((*paths)[highest_level][i].begin(), (*paths)[highest_level][i].end(), startingPos_px);
+        int endingPos_amount = std::count((*paths)[highest_level][i].begin(), (*paths)[highest_level][i].end(), goal_px);
+        if (startingPos_amount > 0 && endingPos_amount > 0){
+            ROS_INFO_STREAM("Path found!");
+            return (*paths)[highest_level][i];
+        }
+    }
+    std::vector<RobotPos_px> null_vector;
+    null_vector.clear();
+    return null_vector;
 }
 
 int get_occupancy_state_at_pos(int x, int y){
-    ROS_INFO_STREAM("get_occupancy_state_at_pos started! x: " << x << "y: " << y);
-    ROS_INFO_STREAM("vector_size: x: " << vector_map[y].size() << "y: " << vector_map.size());
+    // ROS_INFO_STREAM("get_occupancy_state_at_pos started! x: " << x << "y: " << y);
+    // ROS_INFO_STREAM("vector_size: x: " << vector_map[y].size() << "y: " << vector_map.size());
 
     int state = vector_map[y][x];
-    ROS_INFO_STREAM("state: " << state);
+    // ROS_INFO_STREAM("state: " << state);
     return state;
 }
 
@@ -441,30 +536,48 @@ void setMarkerAtRobotPos_px(RobotPos_px pos_px){
     counter_marker += 1;
 }
 
-std::vector<RobotPos_px>* getAdjacentPixel(RobotPos_px initPx){
+std::vector<RobotPos_px> getAdjacentPixel(RobotPos_px initPx){//since cpp v11 you can return by value, without any performance issues
     ROS_INFO_STREAM("getAdjacentPixel started!");
-    std::vector<RobotPos_px>* adj_px;
+    std::vector<RobotPos_px> adj_px;
     ROS_INFO_STREAM("get_occupancy_state_at_pos init: " << get_occupancy_state_at_pos(initPx.x_px, initPx.y_px));
-    if(get_occupancy_state_at_pos(initPx.x_px+1, initPx.x_px) == 1){
-        adj_px->push_back(RobotPos_px{initPx.x_px+1, initPx.x_px});
+    ROS_INFO_STREAM("vector_map[0].size(): " << vector_map[0].size() << ", vector_map.size()" << vector_map.size());
+    if( (initPx.x_px+1) < vector_map[0].size() && get_occupancy_state_at_pos(initPx.x_px+1, initPx.y_px) == 0){
+        adj_px.push_back(RobotPos_px{initPx.x_px+1, initPx.y_px});
+        ROS_INFO_STREAM("Added Pixel to the right");
+    }else{
+        ROS_INFO_STREAM("To the right of pixel x:" << initPx.x_px << ", y:" << initPx.y_px << " there is no space!");
     }
-    if(get_occupancy_state_at_pos(initPx.x_px-1, initPx.x_px) == 1){
-        adj_px->push_back(RobotPos_px{initPx.x_px-1, initPx.x_px});
+    if( (initPx.x_px-1) >= 0 && get_occupancy_state_at_pos(initPx.x_px-1, initPx.y_px) == 0){
+        adj_px.push_back(RobotPos_px{initPx.x_px-1, initPx.y_px});
+        ROS_INFO_STREAM("Added Pixel to the left");
+    }else{
+        ROS_INFO_STREAM("To the left of pixel x:" << initPx.x_px << ", y:" << initPx.y_px << " there is no space!");
     }
-    if(get_occupancy_state_at_pos(initPx.x_px, initPx.x_px+1) == 1){
-        adj_px->push_back(RobotPos_px{initPx.x_px, initPx.x_px+1});
+    if( (initPx.y_px+1) < vector_map.size() && get_occupancy_state_at_pos(initPx.x_px, initPx.y_px+1) == 0){
+        adj_px.push_back(RobotPos_px{initPx.x_px, initPx.y_px+1});
+        ROS_INFO_STREAM("Added Pixel to the top");
+    }else{
+        ROS_INFO_STREAM("To the top of pixel x:" << initPx.x_px << ", y:" << initPx.y_px << " there is no space!");
     }
-    if(get_occupancy_state_at_pos(initPx.x_px, initPx.x_px-1) == 1){
-        adj_px->push_back(RobotPos_px{initPx.x_px, initPx.x_px-1});
+    if( (initPx.y_px-1) >= 0 && get_occupancy_state_at_pos(initPx.x_px, initPx.y_px-1) == 0){
+        adj_px.push_back(RobotPos_px{initPx.x_px, initPx.y_px-1});
+        ROS_INFO_STREAM("Added Pixel to the bottom");
+    }else{
+        ROS_INFO_STREAM("To the bottom of pixel x:" << initPx.x_px << ", y:" << initPx.y_px << " there is no space!");
     }
-
+    
     ROS_INFO_STREAM("getAdjacentPixel ended!");
     return adj_px;
 }
 
-void printVectorPositions(std::vector<RobotPos_px> *v){
-    ROS_INFO_STREAM("printVectorPositions started!");
+void visualizeVectorPositions(std::vector<RobotPos_px>* v){
+    ROS_INFO_STREAM("visualizeVectorPositions started!");
     for(int i=0; i<v->size();i++){
+        setMarkerAtRobotPos_px((*v)[i]);
         ROS_INFO_STREAM("Pixel[" << i << "]: x->" << (*v)[i].x_px << ", y->" << (*v)[i].y_px);
     }
+}
+
+bool operator==(const RobotPos_px& lhs, const RobotPos_px& rhs) {
+  return lhs.x_px == rhs.x_px && lhs.y_px == rhs.y_px;
 }

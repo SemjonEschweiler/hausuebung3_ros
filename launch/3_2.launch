@@ -1,8 +1,5 @@
 <?xml version="1.0" ?>
 <launch>
-    	<!--                                     -->
-    	<!-- Some default settings for our world -->
-    	<!--                                     -->
 	<arg name="pos_x" default="9"/> <!-- This is the robot's x start position -->
 	<arg name="pos_y" default="1"/> <!-- This is the robot's y start position -->
 	<arg name="orient_z" default="0"/> 
@@ -25,21 +22,23 @@
 	<!--                      -->
 	<!-- Place your code here -->
 	<!--                      -->
-	<include file="$(find mir_navigation)/launch/move_base.xml">
-		<arg name="with_virtual_walls" value="false"/>
-	</include>
 	<node name="rviz" pkg="rviz" type="rviz" args="-d $(find hausuebung3_semjon_eschweiler)/rviz/rviz_config.rviz"/>
-	<node name="gmapping" pkg="gmapping" type="slam_gmapping">
+	<node pkg="map_server" type="map_server" name="map_server" args="$(find hausuebung3_semjon_eschweiler)/map/map.yaml"/>	
+	<!-- <node name="gmapping" pkg="gmapping" type="slam_gmapping">
 		<param name="xmax" value="20"/>
 		<param name="ymax" value="20"/>
 		<param name="xmin" value="-20"/>
 		<param name="ymin" value="-20"/>
 		<param name="delta" value="0.1"/>
+	</node> -->
+	<include file="$(find mir_navigation)/launch/amcl.launch">
+	</include>
+	<include file="$(find mir_navigation)/launch/move_base.xml">
+		<arg name="with_virtual_walls" value="false"/>
+	</include>
+	<node pkg="hausuebung3_semjon_eschweiler" type="algorithm_node" name="algorithm_node" output="screen">
+		<param name="uebung3_2" value="1"/>
+		<param name="uebung3_3" value="0"/>
+		<param name="resolution" value="0.1"/>
 	</node>
-	<!-- <node name="server_of_the_map" pkg="map_server" type="map_server"args="$(find summerschool2022)/map/map.yaml"/> -->
-	<!-- <include file="$(find mir_navigation)/launch/amcl.launch">
-		<arg name="initial_pose_x" value="0"/>
-		<arg name="initial_pose_y" value="0"/>
-		<arg name="initial_pose_a" value="0"/>
-	</include> -->
 </launch>
