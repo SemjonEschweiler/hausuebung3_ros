@@ -42,9 +42,12 @@
 	<include file="$(find mir_navigation)/launch/move_base.xml">
 		<arg name="with_virtual_walls" value="false"/>
 	</include>
-	<node pkg="hausuebung3_semjon_eschweiler" type="algorithm_node" name="algorithm_node" output="screen">
+	<!-- <node pkg="hausuebung3_semjon_eschweiler" type="algorithm_node" name="algorithm_node" output="screen">
 		<param name="uebung3_2" value="0"/>
 		<param name="uebung3_3" value="1"/>
 		<param name="resolution" value="0.1"/>
-	</node>
+		<param name="goal_x" value="3"/>
+		<param name="goal_y" value="3"/>
+		<param name="goal_th" value="0"/>
+	</node> -->
 </launch>
