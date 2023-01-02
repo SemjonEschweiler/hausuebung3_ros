@@ -62,11 +62,11 @@ RobotPose_m current_pose;
 bool flag;
 
 double PI = 3.1415926535897;
+bool visualization_on = false;
 ros::Time current_time, last_time;
 bool checkbox_start_status_earlier = false;
 bool checkbox_reset_status_earlier = false;
 bool reset_is_set = false;
-double k_linear, k_alpha, k_beta;
 double resolution_m_per_px;
 int counter_marker = 0;
 
@@ -81,10 +81,12 @@ void rotateByAngle(double angleDg, bool positiveRot, double angVelocityDg);
 void pose_callback(const nav_msgs::Odometry::ConstPtr & pose_message);
 void message_callback(const nav_msgs::OccupancyGrid::ConstPtr& msg);
 void go_to_pose_via_algorithm(RobotPose_m goal);
+void go_to_pos(RobotPose_m goal);
 void visualizeVectorPositions(std::vector<RobotPos_px>* v);
-std::vector<RobotPos_px> getAdjacentPixel(RobotPos_px initPx);
+std::vector<RobotPos_px> getAdjacentPixelIfNotCloseToWall(RobotPos_px initPx);
 std::vector<RobotPos_px> check_if_path_is_found_yet(std::vector<std::vector<std::vector<RobotPos_px>>>* paths, RobotPos_px startingPos_px, RobotPos_px goal_px);
 bool isPosInPointsVisited(RobotPos_px current_adj_px, std::vector<RobotPos_px>* points_visited);
+bool areWallsAround(RobotPos_px initPx);
 
 RobotPos_px convertRobotPose_mToRobotPos_px(RobotPose_m pose_m);
 RobotPose_m convertRobotPos_pxToRobotPose_m(RobotPos_px pos_px);
@@ -173,10 +175,6 @@ int main(int argc, char **argv)
     //Test your code here
     ROS_INFO_STREAM("\n\n\n******START TESTING************\n");    
 
-    k_linear = 0.25;
-    k_alpha = 0.8;
-    k_beta = -0.5;
-
     RobotPos_px px_1 = {200, 200};
     RobotPos_px px_2 = {0, 0};
     RobotPos_px px_3 = {200, 191};
@@ -193,9 +191,9 @@ int main(int argc, char **argv)
 
     // ROS_INFO_STREAM("output_px1.x_px: " << output_px1.x_px << "   output_px1.y_px: " << output_px1.y_px);
     // ROS_INFO_STREAM("output_px2.x_px: " << output_px2.x_px << "   output_px2.y_px: " << output_px2.y_px);
-    // std::vector<RobotPos_px> adj_px_1 = getAdjacentPixel(px_1);
-    // std::vector<RobotPos_px> adj_px_2 = getAdjacentPixel(px_2);
-    // std::vector<RobotPos_px> adj_px_3 = getAdjacentPixel(px_3);
+    // std::vector<RobotPos_px> adj_px_1 = getAdjacentPixelIfNotCloseToWall(px_1);
+    // std::vector<RobotPos_px> adj_px_2 = getAdjacentPixelIfNotCloseToWall(px_2);
+    // std::vector<RobotPos_px> adj_px_3 = getAdjacentPixelIfNotCloseToWall(px_3);
     // visualizeVectorPositions(&adj_px_1);
     // visualizeVectorPositions(&adj_px_2);
     // visualizeVectorPositions(&adj_px_3);
@@ -246,7 +244,7 @@ void find_path() {
 
 void visualize_path_finding() {
     while(!flag){
-        ros::Rate rate(20);
+        ros::Rate rate(10);
         rate.sleep();
         pub_viz.publish(marker_array);
     }
@@ -367,23 +365,25 @@ void go_to_pose_via_algorithm(RobotPose_m goal){
         ROS_INFO_STREAM("Highest level:" << highest_level);
         for(int i=0;i<paths[highest_level].size(); i++){
             current_last_px_of_string = paths[highest_level][i][highest_level];
-            current_adj_px_vec = getAdjacentPixel(current_last_px_of_string );
+            current_adj_px_vec = getAdjacentPixelIfNotCloseToWall(current_last_px_of_string );
             ROS_INFO_STREAM("current_last_px_of_string: (x_px: " << current_last_px_of_string.x_px << ", y_px: " << current_last_px_of_string.y_px << ")");
             for (int j=0;j< current_adj_px_vec.size(); j++){
                 current_adj_px = current_adj_px_vec[j];
                 if(isPosInPointsVisited(current_adj_px, &points_visited)){
                     ROS_INFO_STREAM("This point was already visited! (x_px: " << current_adj_px.x_px << ", y_px: " << current_adj_px.y_px << ")");
                     // continue;setMarkerAtRobotPos_px
-                    // setMarkerAtRobotPos_px(current_adj_px, "red");
+                    if (visualization_on){
+                        setMarkerAtRobotPos_px(current_adj_px, "red", false);
+                    }
                 }else{
-
-                    setMarkerAtRobotPos_px(current_adj_px, "green", false);
+                    if (visualization_on){
+                        setMarkerAtRobotPos_px(current_adj_px, "green", false);
+                    }
                     ROS_INFO_STREAM("This point will be added! (x_px: " << current_adj_px.x_px << ", y_px: " << current_adj_px.y_px << ")");
                     new_string = paths[highest_level][i];
                     new_string.push_back(current_adj_px);
                     next_level.push_back(new_string);
                     points_visited.push_back(current_adj_px);
-                    
                 }
             }
         }
@@ -392,6 +392,10 @@ void go_to_pose_via_algorithm(RobotPose_m goal){
     }
     std::vector<RobotPos_px> path_to_goal = check_if_path_is_found_yet(&paths, startingPos_px, goal_px);
     visualizeVectorPositions(&path_to_goal);
+
+    for (int i=0; i<path_to_goal.size(); i++){
+        go_to_pos(convertRobotPos_pxToRobotPose_m(path_to_goal[i]));
+    }
 }
 
 bool isPosInPointsVisited(RobotPos_px current_adj_px, std::vector<RobotPos_px>* points_visited){
@@ -430,6 +434,12 @@ int get_occupancy_state_at_pos(int x, int y){
 }
 
 void go_to_goal(RobotPose_m goal){
+    
+
+    int k_linear = 0.25;
+    int k_alpha = 1.2;
+    // int k_alpha_fein = 0.4;
+    int k_beta = -0.5;
     ros::Rate loop_rate(10);
 
     ROS_INFO_STREAM("START VALUES START: " );
@@ -454,7 +464,7 @@ void go_to_goal(RobotPose_m goal){
     ROS_INFO_STREAM ("e_angle_alpha=" << abs(e_angle_alpha) << "> deg2rad(5)=" << deg2rad(5) );
 
     // while (abs(e_angle_alpha) > deg2rad(2)){
-    while (e_distance > 0.05 ){
+    while (e_distance > 0.02 ){
     // while (e_distance > 0.04 || abs(e_angle_alpha) > deg2rad(5) || abs(e_angle_beta) > deg2rad(5)){
         e_distance = abs( sqrt( pow( current_pose.x_m - goal.x_m, 2 ) + pow( current_pose.y_m - goal.y_m, 2 ) ) );
         e_angle_alpha = put_angle_in_range(atan2((goal.y_m - current_pose.y_m), (goal.x_m - current_pose.x_m)) - current_pose.th_rad);
@@ -477,6 +487,56 @@ void go_to_goal(RobotPose_m goal){
         loop_rate.sleep();
     }
     endMovement();
+}
+
+void go_to_pos(RobotPose_m goal){
+    int k_linear = 0.25*14;
+    int k_alpha_grob = 2;
+    int k_alpha_fein = 1.0;
+    int k_beta = -0.5;
+    ros::Rate rate(10);
+    ROS_INFO_STREAM("START VALUES START: " );
+    ROS_INFO_STREAM("start_x=" << current_pose.x_m << ", start_y=" << current_pose.y_m << ", start_th=" << current_pose.th_rad);
+
+    double e_distance = abs( sqrt( pow( current_pose.x_m - goal.x_m, 2 ) + pow( current_pose.y_m - goal.y_m, 2 ) ) );
+    double e_angle_alpha = put_angle_in_range(atan2((goal.y_m - current_pose.y_m), (goal.x_m - current_pose.x_m)) - current_pose.th_rad);
+
+    ROS_INFO_STREAM("e_distance[" << e_distance << "] = abs( sqrt( pow( current_pose.x_m[" << current_pose.x_m << "] - goal.x_m[ " << goal.x_m << 
+    "], 2 ) + pow( current_pose.y_m[" << current_pose.y_m << "] - goal.y_m[" << goal.y_m << "], 2 ) ) );");
+    ROS_INFO_STREAM("e_alpha[" << e_angle_alpha << "] = atan2((goal.y_m[" << goal.y_m << "] - current_pose.y_m[" << current_pose.y_m << "]), (goal.x_m[" << goal.x_m << "] - current_pose.x_m[" 
+    << current_pose.x_m << "])) - current_pose.th_rad[" << current_pose.th_rad << "]");
+    ROS_INFO_STREAM("START VALUES END" << std::endl);
+
+    while(abs(e_angle_alpha) > deg2rad(5)){//start p-controller when e_alpha has less than 10 deg 
+        e_angle_alpha = put_angle_in_range(atan2((goal.y_m - current_pose.y_m), (goal.x_m - current_pose.x_m)) - current_pose.th_rad);
+        vel_msg.angular.z = k_alpha_grob * e_angle_alpha;
+        publisher.publish(vel_msg);
+        ros::spinOnce();
+        rate.sleep();
+
+    }
+
+    while (e_distance > 0.01 ){
+        // while (e_distance > 0.04 || abs(e_angle_alpha) > deg2rad(5) || abs(e_angle_beta) > deg2rad(5)){
+            e_distance = abs( sqrt( pow( current_pose.x_m - goal.x_m, 2 ) + pow( current_pose.y_m - goal.y_m, 2 ) ) );
+            e_angle_alpha = put_angle_in_range(atan2((goal.y_m - current_pose.y_m), (goal.x_m - current_pose.x_m)) - current_pose.th_rad);
+            vel_msg.linear.x = k_linear * e_distance;
+            // vel_msg.angular.z = k_alpha * e_angle_alpha;
+            // vel_msg.angular.z = k_beta * e_angle_beta;
+            vel_msg.angular.z = k_alpha_fein * e_angle_alpha;// + k_beta * e_angle_beta;
+
+            ROS_INFO_STREAM("e_distance[" << e_distance << "] = abs( sqrt( pow( current_pose.x_m[" << current_pose.x_m << "] - goal.x_m[ " << goal.x_m << 
+            "], 2 ) + pow( current_pose.y_m[" << current_pose.y_m << "] - goal.y_m[" << goal.y_m << "], 2 ) ) );");
+            ROS_INFO_STREAM("e_alpha[" << e_angle_alpha << "] = atan2((goal.y_m[" << goal.y_m << "] - current_pose.y_m[" << current_pose.y_m << "]), (goal.x_m[" << goal.x_m << "] - current_pose.x_m[" 
+            << current_pose.x_m << "])) - current_pose.th_rad[" << current_pose.th_rad << "]");
+            
+            ROS_INFO_STREAM("vel_msg.linear.x =" << vel_msg.linear.x);
+            ROS_INFO_STREAM("vel_msg.angular.z =" << vel_msg.angular.z << std::endl);
+            publisher.publish(vel_msg);
+            ros::spinOnce();
+            rate.sleep();
+        }
+        endMovement();
 }
 
 
@@ -590,7 +650,7 @@ void setMarkerAtRobotPos_px(RobotPos_px pos_px, std::string color, bool permanen
         marker.color.b = 0.0;  // Set the blue color valueCopy code
     }
     if (!permanent){
-        marker.lifetime = ros::Duration(0.3);
+        marker.lifetime = ros::Duration(0.1);
     }else{
         marker.lifetime = ros::Duration(0);
     }
@@ -609,37 +669,42 @@ void setMarkerAtRobotPos_px(RobotPos_px pos_px, std::string color, bool permanen
     counter_marker += 1;
 }
 
-std::vector<RobotPos_px> getAdjacentPixel(RobotPos_px initPx){//since cpp v11 you can return by value, without any performance issues
-    // ROS_INFO_STREAM("getAdjacentPixel started!");
+std::vector<RobotPos_px> getAdjacentPixelIfNotCloseToWall(RobotPos_px initPx){//since cpp v11 you can return by value, without any performance issues
+    // ROS_INFO_STREAM("getAdjacentPixelIfNotCloseToWall started!");
     std::vector<RobotPos_px> adj_px;
     // ROS_INFO_STREAM("get_occupancy_state_at_pos init: " << get_occupancy_state_at_pos(initPx.x_px, initPx.y_px));
     // ROS_INFO_STREAM("vector_map[0].size(): " << vector_map[0].size() << ", vector_map.size()" << vector_map.size());
-    if( (initPx.x_px+1) < vector_map[0].size() && get_occupancy_state_at_pos(initPx.x_px+1, initPx.y_px) == 0){
+    bool areWallsAround_var = areWallsAround(initPx);
+    if( (initPx.x_px+1) < vector_map[0].size() && get_occupancy_state_at_pos(initPx.x_px+1, initPx.y_px) == 0
+    && areWallsAround(RobotPos_px{initPx.x_px+1, initPx.y_px})){
         adj_px.push_back(RobotPos_px{initPx.x_px+1, initPx.y_px});
         // ROS_INFO_STREAM("Added Pixel to the right");
     }else{
         // ROS_INFO_STREAM("To the right of pixel x:" << initPx.x_px << ", y:" << initPx.y_px << " there is no space!");
     }
-    if( (initPx.x_px-1) >= 0 && get_occupancy_state_at_pos(initPx.x_px-1, initPx.y_px) == 0){
+    if( (initPx.x_px-1) >= 0 && get_occupancy_state_at_pos(initPx.x_px-1, initPx.y_px) == 0
+    && areWallsAround(RobotPos_px{initPx.x_px-1, initPx.y_px})){
         adj_px.push_back(RobotPos_px{initPx.x_px-1, initPx.y_px});
         // ROS_INFO_STREAM("Added Pixel to the left");
     }else{
         // ROS_INFO_STREAM("To the left of pixel x:" << initPx.x_px << ", y:" << initPx.y_px << " there is no space!");
     }
-    if( (initPx.y_px+1) < vector_map.size() && get_occupancy_state_at_pos(initPx.x_px, initPx.y_px+1) == 0){
+    if( (initPx.y_px+1) < vector_map.size() && get_occupancy_state_at_pos(initPx.x_px, initPx.y_px+1) == 0
+    && areWallsAround(RobotPos_px{initPx.x_px, initPx.y_px+1})){
         adj_px.push_back(RobotPos_px{initPx.x_px, initPx.y_px+1});
         // ROS_INFO_STREAM("Added Pixel to the top");
     }else{
         // ROS_INFO_STREAM("To the top of pixel x:" << initPx.x_px << ", y:" << initPx.y_px << " there is no space!");
     }
-    if( (initPx.y_px-1) >= 0 && get_occupancy_state_at_pos(initPx.x_px, initPx.y_px-1) == 0){
+    if( (initPx.y_px-1) >= 0 && get_occupancy_state_at_pos(initPx.x_px, initPx.y_px-1) == 0
+    && areWallsAround(RobotPos_px{initPx.x_px, initPx.y_px-1})){
         adj_px.push_back(RobotPos_px{initPx.x_px, initPx.y_px-1});
         // ROS_INFO_STREAM("Added Pixel to the bottom");
     }else{
         // ROS_INFO_STREAM("To the bottom of pixel x:" << initPx.x_px << ", y:" << initPx.y_px << " there is no space!");
     }
     
-    // ROS_INFO_STREAM("getAdjacentPixel ended!");
+    // ROS_INFO_STREAM("getAdjacentPixelIfNotCloseToWall ended!");
     return adj_px;
 }
 
@@ -654,4 +719,91 @@ void visualizeVectorPositions(std::vector<RobotPos_px>* v){
 
 bool operator==(const RobotPos_px& lhs, const RobotPos_px& rhs) {
   return lhs.x_px == rhs.x_px && lhs.y_px == rhs.y_px;
+}
+
+bool areWallsAround(RobotPos_px pos){
+    if (
+        get_occupancy_state_at_pos(pos.x_px, pos.y_px+1) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px, pos.y_px+2) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px, pos.y_px+3) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px, pos.y_px+4) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px, pos.y_px+5) == 0 &&
+
+        get_occupancy_state_at_pos(pos.x_px, pos.y_px-1) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px, pos.y_px-2) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px, pos.y_px-3) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px, pos.y_px-4) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px, pos.y_px-5) == 0 &&
+
+        get_occupancy_state_at_pos(pos.x_px+1, pos.y_px) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px+2, pos.y_px) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px+3, pos.y_px) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px+4, pos.y_px) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px+5, pos.y_px) == 0 &&
+
+        get_occupancy_state_at_pos(pos.x_px-1, pos.y_px) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px-2, pos.y_px) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px-3, pos.y_px) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px-4, pos.y_px) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px-5, pos.y_px) == 0 &&
+
+        get_occupancy_state_at_pos(pos.x_px-5, pos.y_px+1) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px-5, pos.y_px-1) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px-5, pos.y_px+2) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px-5, pos.y_px-2) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px-5, pos.y_px+3) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px-5, pos.y_px-3) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px-5, pos.y_px+4) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px-5, pos.y_px-4) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px-5, pos.y_px+5) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px-5, pos.y_px-5) == 0 &&
+
+        get_occupancy_state_at_pos(pos.x_px+1, pos.y_px+5) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px-1, pos.y_px+5) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px+2, pos.y_px+5) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px-2, pos.y_px+5) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px+3, pos.y_px+5) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px-3, pos.y_px+5) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px+4, pos.y_px+5) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px-4, pos.y_px+5) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px+5, pos.y_px+5) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px-5, pos.y_px+5) == 0 &&
+
+        get_occupancy_state_at_pos(pos.x_px+5, pos.y_px+1) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px+5, pos.y_px-1) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px+5, pos.y_px+2) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px+5, pos.y_px-2) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px+5, pos.y_px+3) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px+5, pos.y_px-3) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px+5, pos.y_px+4) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px+5, pos.y_px-4) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px+5, pos.y_px+5) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px+5, pos.y_px-5) == 0 &&
+
+        get_occupancy_state_at_pos(pos.x_px+1, pos.y_px-5) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px-1, pos.y_px-5) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px+2, pos.y_px-5) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px-2, pos.y_px-5) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px+3, pos.y_px-5) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px-3, pos.y_px-5) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px+4, pos.y_px-5) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px-4, pos.y_px-5) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px+5, pos.y_px-5) == 0 &&
+        get_occupancy_state_at_pos(pos.x_px-5, pos.y_px-5) == 0    
+
+        // get_occupancy_state_at_pos(pos.x_px-4, pos.y_px+3) == 0 &&
+        // get_occupancy_state_at_pos(pos.x_px-4, pos.y_px-3) == 0 &&
+        // get_occupancy_state_at_pos(pos.x_px-3, pos.y_px+4) == 0 &&
+        // get_occupancy_state_at_pos(pos.x_px-3, pos.y_px-4) == 0 &&    
+
+        // get_occupancy_state_at_pos(pos.x_px+4, pos.y_px+3) == 0 &&
+        // get_occupancy_state_at_pos(pos.x_px+4, pos.y_px-3) == 0 &&
+        // get_occupancy_state_at_pos(pos.x_px+3, pos.y_px+4) == 0 &&
+        // get_occupancy_state_at_pos(pos.x_px+3, pos.y_px-4) == 0 
+
+    ){
+        return true;
+    }else{
+        return false;
+    }
 }

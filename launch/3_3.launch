@@ -46,8 +46,8 @@
 		<param name="uebung3_2" value="0"/>
 		<param name="uebung3_3" value="1"/>
 		<param name="resolution" value="0.1"/>
-		<param name="goal_x" value="-3"/>
-		<param name="goal_y" value="7"/>
+		<param name="goal_x" value="-7"/>
+		<param name="goal_y" value="6"/>
 		<param name="goal_th" value="0"/>
 	</node>
 </launch>
