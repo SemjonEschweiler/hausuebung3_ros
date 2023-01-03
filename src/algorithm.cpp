@@ -66,7 +66,7 @@ RobotPose_m current_pose;
 bool flag;
 
 double PI = 3.1415926535897;
-bool visualization_on = true;
+bool visualization_on = false;
 ros::Time current_time, last_time;
 bool checkbox_start_status_earlier = false;
 bool checkbox_reset_status_earlier = false;
@@ -248,7 +248,7 @@ void find_path() {
 
 void visualize_path_finding() {
     while(!flag){
-        ros::Rate rate(10);
+        ros::Rate rate(5);
         rate.sleep();
         pub_viz.publish(marker_array);
     }
