@@ -217,6 +217,15 @@ int main(int argc, char **argv)
             }
         }
     } else if(isUebung3_3){
+        //THIS IS THE CALLIBRATION!
+        moveStraightLine(1.5, true, 2);
+        rotateByAngle(90, true, 45);
+        moveStraightLine(1.5, true, 2);
+        rotateByAngle(90, true, 45);
+        moveStraightLine(1.5, true, 2);
+        rotateByAngle(90, true, 45);
+        moveStraightLine(1.5, true, 2);
+        
         ROS_INFO_STREAM("Hausuebung3_3 will start now!!");
         std::thread t1(find_path);
         std::thread t2(visualize_path_finding);
