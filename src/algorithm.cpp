@@ -4,15 +4,13 @@
 // k_alpha = 0.8; <-- abs(k_alpha) needs to be bigger than abs(k_linear) see Siegwart: Introduction to mobile robots
 // k_beta = -0.5; <-- beta is smaller than 0 see Siegwart: Introduction to mobile robots
 //
-#pragma GCC push_options
-#pragma GCC optimize ("O0")
-
 #include <ros/ros.h>
 #include <ros/duration.h>
 #include "std_msgs/String.h"
 #include "geometry_msgs/Twist.h"
 // #include "geometry_msgs/PoseWithCovarianceStamped.h"
 #include "nav_msgs/Odometry.h"
+#include "nav_msgs/Path.h"
 #include "std_srvs/Empty.h"
 #include "nav_msgs/OccupancyGrid.h"
 #include <visualization_msgs/Marker.h>
@@ -28,7 +26,7 @@
 // #include <tf/transform_listener.h>
 
 // #include "dynamic_reconfigure/server.h"
-// #include "hausuebung3_semjon_eschweiler/linearControllerConfig.h"
+// #include "eschweiler_hw3/linearControllerConfig.h"
 
 struct Quaternion{
     double w, x, y, z;
@@ -54,10 +52,12 @@ struct RobotPos_px {
 
 ros::Publisher publisher;
 ros::Publisher pub_viz;
+ros::Publisher pub_path;
 visualization_msgs::MarkerArray marker_array;
 // ros::Publisher pose_publisher;
 ros::Subscriber subscriber_pose;
 ros::Subscriber sub_map;
+ros::Subscriber sub_goal;
 ros::ServiceClient client;
 nav_msgs::Odometry turtle_odom;
 std_msgs::String pose_info;
@@ -73,6 +73,7 @@ bool checkbox_reset_status_earlier = false;
 bool reset_is_set = false;
 double resolution_m_per_px;
 int counter_marker = 0;
+nav_msgs::Path path_msg;
 
 double goal_x;
 double goal_y;
@@ -91,10 +92,11 @@ std::vector<RobotPos_px> getAdjacentPixelIfNotCloseToWall(RobotPos_px initPx);
 std::vector<RobotPos_px> check_if_path_is_found_yet(std::vector<std::vector<std::vector<RobotPos_px>>>* paths, RobotPos_px startingPos_px, RobotPos_px goal_px);
 bool isPosInPointsVisited(RobotPos_px current_adj_px, std::vector<RobotPos_px>* points_visited);
 bool areWallsAround(RobotPos_px initPx);
+void goal_callback(const geometry_msgs::PoseStamped::ConstPtr & pose_message);
 
 RobotPos_px convertRobotPose_mToRobotPos_px(RobotPose_m pose_m);
 RobotPose_m convertRobotPos_pxToRobotPose_m(RobotPos_px pos_px);
-// void dynamic_callback(hausuebung3_semjon_eschweiler::linearControllerConfig &config, uint32_t level);
+// void dynamic_callback(eschweiler_hw3::linearControllerConfig &config, uint32_t level);
 double put_angle_in_range(double angle);
 void go_to_goal(RobotPose_m goal);
 void endMovement();
@@ -104,7 +106,7 @@ EulerAngles ToEulerAngles(Quaternion q);
 std::vector<std::vector<int>> vector_map;
 void setMarkerAtRobotPos_px(RobotPos_px pos_px, std::string color, bool permanent);
 void visualize_path_finding();
-void find_path();
+void find_path(RobotPose_m);
 bool map_received = false;
 
 ros::Duration ten_seconds;
@@ -142,8 +144,8 @@ int main(int argc, char **argv)
     for (int i=0;i<30; i++){
         rate.sleep();
     }
-    // dynamic_reconfigure::Server<hausuebung3_semjon_eschweiler::linearControllerConfig> server;
-    // dynamic_reconfigure::Server<hausuebung3_semjon_eschweiler::linearControllerConfig>::CallbackType f;
+    // dynamic_reconfigure::Server<eschweiler_hw3::linearControllerConfig> server;
+    // dynamic_reconfigure::Server<eschweiler_hw3::linearControllerConfig>::CallbackType f;
 
     // f = boost::bind(&dynamic_callback, _1, _2);
     // server.setCallback(f);
@@ -154,9 +156,11 @@ int main(int argc, char **argv)
 
 	publisher = n.advertise<geometry_msgs::Twist>("/cmd_vel", 1000);
     pub_viz = n.advertise<visualization_msgs::MarkerArray>("/visualization_marker_array", 100000000);
-    subscriber_pose = n.subscribe("/odom", 10, pose_callback);
+    pub_path = n.advertise<nav_msgs::Path>("/breadth_first_path", 1000, true);
     client = n.serviceClient<std_srvs::Empty>("/gazebo/reset_simulation");
+    subscriber_pose = n.subscribe("/odom", 10, pose_callback);
     sub_map = n.subscribe("/map", 10, message_callback);
+    sub_goal = n.subscribe("/move_base_simple/goal", 10, goal_callback);
 
     // std::vector<int> vic = {1,2,3,4,5};
 
@@ -217,7 +221,7 @@ int main(int argc, char **argv)
             }
         }
     } else if(isUebung3_3){
-        //THIS IS THE CALLIBRATION!
+        //CALLIBRATION
         moveStraightLine(1.5, true, 2);
         rotateByAngle(90, true, 45);
         moveStraightLine(1.5, true, 2);
@@ -225,14 +229,7 @@ int main(int argc, char **argv)
         moveStraightLine(1.5, true, 2);
         rotateByAngle(90, true, 45);
         moveStraightLine(1.5, true, 2);
-        
         ROS_INFO_STREAM("Hausuebung3_3 will start now!!");
-        std::thread t1(find_path);
-        std::thread t2(visualize_path_finding);
-
-        // Wait for the threads to complete
-        t1.join();
-        t2.join();
     }
     //go_to_goal(xi_1);
     //
@@ -248,10 +245,9 @@ int main(int argc, char **argv)
    return 0;
 }
 
-void find_path() {
-
-    RobotPose_m rp = {goal_x, goal_y,goal_th};
-    go_to_pose_via_algorithm(rp);
+void find_path(RobotPose_m goal) {
+    flag = false;
+    go_to_pose_via_algorithm(goal);
     flag = true;
 }
 
@@ -260,10 +256,13 @@ void visualize_path_finding() {
         ros::Rate rate(5);
         rate.sleep();
         pub_viz.publish(marker_array);
+        pub_path.publish(path_msg);
     }
+    marker_array.markers.clear();
+    path_msg.poses.clear();
 }
 
-// void dynamic_callback(hausuebung3_semjon_eschweiler::linearControllerConfig &config, uint32_t level) {
+// void dynamic_callback(eschweiler_hw3::linearControllerConfig &config, uint32_t level) {
 //     ROS_INFO_STREAM("Reconfigure Request: \n" << "\tk_linear: " << config.k_linear << std::endl <<
 //             "\tk_alpha: " << config.k_alpha << std::endl <<
 //             "\tk_beta: " << config.k_beta << std::endl <<
@@ -350,6 +349,33 @@ void pose_callback(const nav_msgs::Odometry::ConstPtr & pose_message){
 	// pose_publisher.publish(pose_info);    
 }
 
+void goal_callback(const geometry_msgs::PoseStamped::ConstPtr & pose_message){
+    // ros::spinOnce();
+    Quaternion q ;
+    RobotPose_m goal;
+    
+    ROS_INFO_STREAM("RECEIVED GOAL!");
+
+    goal.x_m = pose_message->pose.position.x;
+    goal.y_m = pose_message->pose.position.y;
+
+    q.w = pose_message->pose.orientation.w;
+    q.x = pose_message->pose.orientation.x;
+    q.y = pose_message->pose.orientation.y;
+    q.z = pose_message->pose.orientation.z;
+
+    EulerAngles angles = ToEulerAngles(q);
+    goal.th_rad = angles.yaw;
+    
+    std::thread t1(find_path, goal);
+    std::thread t2(visualize_path_finding);
+
+    // Wait for the threads to complete
+    t1.join();
+    t2.join();
+
+}
+
 void go_to_pose_via_algorithm(RobotPose_m goal){
     RobotPose_m currentPose_C_Odom = {current_pose.x_m, current_pose.y_m, current_pose.th_rad};
     RobotPos_px startingPos_px = convertRobotPose_mToRobotPos_px(currentPose_C_Odom);
@@ -405,10 +431,32 @@ void go_to_pose_via_algorithm(RobotPose_m goal){
     }
     std::vector<RobotPos_px> path_to_goal = check_if_path_is_found_yet(&paths, startingPos_px, goal_px);
     visualizeVectorPositions(&path_to_goal);
+    path_msg.header.frame_id = "odom";
+    path_msg.header.stamp = ros::Time::now();
+    for (int i=0; i<path_to_goal.size(); i++){
+        geometry_msgs::PoseStamped pose;
+        pose.header.frame_id = "odom";
+        pose.header.stamp = ros::Time::now();
+        pose.pose.position.x = convertRobotPos_pxToRobotPose_m(path_to_goal[i]).x_m;
+        pose.pose.position.y = convertRobotPos_pxToRobotPose_m(path_to_goal[i]).y_m;
+        pose.pose.position.z = 0;
+        pose.pose.orientation.w = 1;
+        pose.header.seq = i;
+        path_msg.poses.push_back(pose);
+        
+    }
 
     for (int i=0; i<path_to_goal.size(); i++){
         go_to_pos(convertRobotPos_pxToRobotPose_m(path_to_goal[i]));
     }
+    endMovement();
+    marker_array.markers.clear();
+    path_msg.poses.clear();
+    path_to_goal.clear();
+    ros::Duration(1).sleep();
+    ROS_INFO_STREAM("REACHED GOAL; CONGRATULATION LITTLE ROBOT");
+    ROS_INFO_STREAM("REACHED GOAL; CONGRATULATION LITTLE ROBOT");
+    ROS_INFO_STREAM("REACHED GOAL; CONGRATULATION LITTLE ROBOT");
 }
 
 bool isPosInPointsVisited(RobotPos_px current_adj_px, std::vector<RobotPos_px>* points_visited){
@@ -503,9 +551,9 @@ void go_to_goal(RobotPose_m goal){
 }
 
 void go_to_pos(RobotPose_m goal){
-    double k_linear = 0.25*8;
+    double k_linear = 0.25*5;
     double k_alpha_grob = 2;
-    double k_alpha_fein = 0.8;
+    double k_alpha_fein = 0.6;
     double k_beta = -0.5;
     ros::Rate rate(10);
     ROS_INFO_STREAM("START VALUES START: " );
@@ -521,7 +569,7 @@ void go_to_pos(RobotPose_m goal){
     // << current_pose.x_m << "])) - current_pose.th_rad[" << current_pose.th_rad << "]");
     // ROS_INFO_STREAM("START VALUES END" << std::endl);
 
-    while(abs(e_angle_alpha) > deg2rad(8)){//start p-controller when e_alpha has less than 10 deg 
+    while(abs(e_angle_alpha) > deg2rad(7)){//start p-controller when e_alpha has less than 4 deg 
         e_angle_alpha = put_angle_in_range(atan2((goal.y_m - current_pose.y_m), (goal.x_m - current_pose.x_m)) - current_pose.th_rad);
         vel_msg.angular.z = k_alpha_grob * e_angle_alpha;
         publisher.publish(vel_msg);
@@ -530,7 +578,7 @@ void go_to_pos(RobotPose_m goal){
 
     }
 
-    while (e_distance > 0.01 ){
+    while (e_distance > 0.015 ){
         // while (e_distance > 0.04 || abs(e_angle_alpha) > deg2rad(5) || abs(e_angle_beta) > deg2rad(5)){
             e_distance = abs( sqrt( pow( current_pose.x_m - goal.x_m, 2 ) + pow( current_pose.y_m - goal.y_m, 2 ) ) );
             e_angle_alpha = put_angle_in_range(atan2((goal.y_m - current_pose.y_m), (goal.x_m - current_pose.x_m)) - current_pose.th_rad);
@@ -899,5 +947,3 @@ void rotateByAngle(double angleDg, bool positiveRot, double angVelocityDg){
     }
     endMovement();
 }
-
-#pragma GCC pop_options
